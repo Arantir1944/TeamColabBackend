@@ -1,0 +1,10 @@
+{
+  "development": {
+    "username": "postgres",
+    "password": "mentolat1944",
+    "database": "team_hub_db",
+    "host": "localhost",
+    "port": 5432,
+    "dialect": "postgres"
+  }
+}
