@@ -3,15 +3,15 @@ const { User } = require("../models");
 const updateRole = async (req, res) => {
     try {
         const { userId, role } = req.body;
-        const adminId = req.user.id;
+        const managerId = req.user.id;
 
-        // Check if the requesting user is a Manager
-        const adminUser = await User.findByPk(adminId);
-        if (!adminUser || adminUser.role !== "Manager") {
-            return res.status(403).json({ message: "Permission denied. Only Managers can update roles." });
+        // Ensure the requesting user is a Manager
+        const managerUser = await User.findByPk(managerId);
+        if (!managerUser || managerUser.role !== "Manager") {
+            return res.status(403).json({ message: "Only Managers can update roles." });
         }
 
-        // Validate the new role
+        // Ensure only valid roles are assigned
         const validRoles = ["Manager", "Team Leader", "Employee"];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ message: "Invalid role provided." });
