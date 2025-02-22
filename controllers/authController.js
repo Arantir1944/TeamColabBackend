@@ -39,7 +39,13 @@ const login = async (req, res) => {
             { expiresIn: "1h" }
         );
 
-        res.json({ token });
+        // authController.js (modified)
+        res.json({
+            token: `Bearer ${token}`,
+            tokenType: 'Bearer',
+            expiresIn: 3600  // in seconds (1 hour)
+        });
+
     } catch (error) {
         console.error("Login error:", error);
         res.status(500).json({ message: "Server error" });
