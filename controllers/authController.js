@@ -4,17 +4,30 @@ const { User } = require("../models");
 
 const register = async (req, res) => {
     try {
-        const { firstName, lastName, email, password } = req.body;
+        // Since the route is protected, req.user is a Manager.
+        const { firstName, lastName, email, password, role } = req.body;
+        const validRoles = ["Manager", "Team Leader", "Employee"];
+
+        // Validate role if provided.
+        if (role && !validRoles.includes(role)) {
+            return res.status(400).json({ message: "Invalid role provided" });
+        }
 
         let user = await User.findOne({ where: { email } });
         if (user) return res.status(400).json({ message: "User already exists" });
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        user = await User.create({ firstName, lastName, email, password: hashedPassword });
+        user = await User.create({
+            firstName,
+            lastName,
+            email,
+            password: hashedPassword,
+            role: role || "Employee" // Use provided role or default.
+        });
 
         res.status(201).json({ message: "User registered successfully" });
     } catch (error) {
-        console.error("Error during user registration:", error);  // <== Log the error
+        console.error("Error during user registration:", error);
         res.status(500).json({ message: "Server error" });
     }
 };
