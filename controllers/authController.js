@@ -5,7 +5,7 @@ const { User } = require("../models");
 const register = async (req, res) => {
     try {
         // Since the route is protected, req.user is a Manager.
-        const { firstName, lastName, email, password, role } = req.body;
+        const { firstName, lastName, email, password, role, teamId } = req.body;
         const validRoles = ["Manager", "Team Leader", "Employee"];
 
         // Validate role if provided.
@@ -21,6 +21,7 @@ const register = async (req, res) => {
             firstName,
             lastName,
             email,
+            teamId,
             password: hashedPassword,
             role: role || "Employee" // Use provided role or default.
         });
