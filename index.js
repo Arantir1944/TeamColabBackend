@@ -22,20 +22,30 @@ const socketMiddleware = require("./middleware/socketMiddleware");
 app.use(socketMiddleware(io));
 
 // WebSocket handling
-io.on("connection", (socket) => {
-    console.log(`User connected: ${socket.id}`);
-
-    // Join a team room (for real-time updates in the same team)
-    socket.on("joinTeam", (teamId) => {
-        socket.join(`team-${teamId}`);
-        console.log(`User joined team-${teamId}`);
+io.on("connection", socket => {
+    // identify the user’s socket-room
+    socket.on("register", ({ userId }) => {
+        socket.join(`user-${userId}`);
     });
 
-    // Handle disconnections
+    // chat rooms
+    socket.on("joinConversation", conversationId => {
+        socket.join(`conversation-${conversationId}`);
+    });
+    socket.on("leaveConversation", conversationId => {
+        socket.leave(`conversation-${conversationId}`);
+    });
+
+    // WebRTC signaling for calls
+    socket.on("offer", payload => io.to(`call-${payload.callId}`).emit("offer", payload));
+    socket.on("answer", payload => io.to(`call-${payload.callId}`).emit("answer", payload));
+    socket.on("ice-candidate", payload => io.to(`call-${payload.callId}`).emit("ice-candidate", payload));
+
     socket.on("disconnect", () => {
         console.log(`User disconnected: ${socket.id}`);
     });
 });
+
 
 // Routes
 app.get("/", (req, res) => {
@@ -62,6 +72,13 @@ app.use("/api/tasks", taskRoutes);
 
 const wikiRoutes = require("./routes/wikiRoutes");
 app.use("/api/wiki", wikiRoutes);
+
+const chatRoutes = require("./routes/chatRoutes");
+app.use("/api/chat", chatRoutes);
+
+const callRoutes = require("./routes/callRoutes");
+app.use("/api/calls", callRoutes);
+
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {

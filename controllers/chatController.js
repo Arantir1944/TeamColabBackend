@@ -1,5 +1,10 @@
-/ controllers/chatController.js
-const { Conversation, ConversationParticipant, Message, User, Team } = require("../models");
+// controllers/chatController.js
+const {
+    Conversation,
+    ConversationParticipant,
+    Message,
+    User
+} = require("../models");
 const { Op } = require("sequelize");
 
 // Create a direct conversation between two users
@@ -9,28 +14,19 @@ const createDirectConversation = async (req, res) => {
         const currentUserId = req.user.id;
         const teamId = req.user.teamId;
 
-        // Check if users are in the same team
+        // Ensure the target user is on the same team
         const targetUser = await User.findByPk(targetUserId);
         if (!targetUser || targetUser.teamId !== teamId) {
             return res.status(404).json({ message: "User not found or not in your team" });
         }
 
-        // Check if conversation already exists
+        // Check for an existing direct conversation
         const existingConvo = await Conversation.findOne({
+            where: { type: "direct", teamId },
             include: [
-                {
-                    model: User,
-                    where: { id: currentUserId }
-                },
-                {
-                    model: User,
-                    where: { id: targetUserId }
-                }
-            ],
-            where: {
-                type: 'direct',
-                teamId: teamId
-            }
+                { model: User, as: "Users", where: { id: currentUserId } },
+                { model: User, as: "Users", where: { id: targetUserId } }
+            ]
         });
 
         if (existingConvo) {
@@ -40,13 +36,8 @@ const createDirectConversation = async (req, res) => {
             });
         }
 
-        // Create new conversation
-        const conversation = await Conversation.create({
-            type: 'direct',
-            teamId: teamId
-        });
-
-        // Add both users as participants
+        // Create and add participants
+        const conversation = await Conversation.create({ type: "direct", teamId });
         await ConversationParticipant.bulkCreate([
             { conversationId: conversation.id, userId: currentUserId },
             { conversationId: conversation.id, userId: targetUserId }
@@ -69,42 +60,30 @@ const createGroupConversation = async (req, res) => {
         const currentUserId = req.user.id;
         const teamId = req.user.teamId;
 
-        // Ensure name is provided for group conversations
         if (!name) {
             return res.status(400).json({ message: "Name is required for group conversations" });
         }
-
-        // Ensure there are at least 2 other participants
         if (!participantIds || participantIds.length < 2) {
             return res.status(400).json({ message: "At least 2 participants required" });
         }
 
-        // Verify all participants are in the same team
+        // Verify everyone is in the same team
         const participants = await User.findAll({
             where: {
                 id: { [Op.in]: [...participantIds, currentUserId] },
-                teamId: teamId
+                teamId
             }
         });
-
         if (participants.length !== participantIds.length + 1) {
             return res.status(400).json({ message: "Some users not found or not in your team" });
         }
 
-        // Create new group conversation
-        const conversation = await Conversation.create({
-            name,
-            type: 'group',
-            teamId
-        });
-
-        // Add all participants
-        const participantObjects = [...participantIds, currentUserId].map(userId => ({
+        const conversation = await Conversation.create({ name, type: "group", teamId });
+        const rows = [...participantIds, currentUserId].map(userId => ({
             conversationId: conversation.id,
             userId
         }));
-
-        await ConversationParticipant.bulkCreate(participantObjects);
+        await ConversationParticipant.bulkCreate(rows);
 
         res.status(201).json({
             message: "Group conversation created successfully",
@@ -116,35 +95,31 @@ const createGroupConversation = async (req, res) => {
     }
 };
 
-// Get all conversations for the current user
+// List all conversations for the current user
 const getUserConversations = async (req, res) => {
     try {
         const userId = req.user.id;
         const teamId = req.user.teamId;
 
+        // 1) find all convo IDs this user is in
+        const rows = await ConversationParticipant.findAll({
+            where: { userId },
+            attributes: ["conversationId"]
+        });
+        const convoIds = rows.map(r => r.conversationId);
+
+        // 2) load those conversations with participants
         const conversations = await Conversation.findAll({
+            where: { id: convoIds, teamId },
             include: [
                 {
                     model: User,
-                    attributes: ['id', 'firstName', 'lastName', 'email'],
-                    through: { attributes: [] } // Don't include the join table
-                },
-                {
-                    model: Message,
-                    limit: 1,
-                    order: [['createdAt', 'DESC']],
-                    include: [
-                        { model: User, as: 'sender', attributes: ['id', 'firstName', 'lastName'] }
-                    ]
+                    as: "Users",
+                    attributes: ["id", "firstName", "lastName", "email"],
+                    through: { attributes: [] }
                 }
             ],
-            where: {
-                teamId,
-                '$Users.id$': userId // Only conversations where the user is a participant
-            },
-            order: [
-                [Message, 'createdAt', 'DESC']
-            ]
+            order: [["updatedAt", "DESC"]]
         });
 
         res.json({ conversations });
@@ -154,45 +129,62 @@ const getUserConversations = async (req, res) => {
     }
 };
 
-// Get a specific conversation with messages
+// Get a specific conversation and all its messages
 const getConversationWithMessages = async (req, res) => {
     try {
-        const { id } = req.params;
+        const convoId = parseInt(req.params.id, 10);
         const userId = req.user.id;
         const teamId = req.user.teamId;
 
+        // 1) Verify the user is a participant
+        const participation = await ConversationParticipant.findOne({
+            where: { conversationId: convoId, userId }
+        });
+        if (!participation) {
+            return res
+                .status(404)
+                .json({ message: "Conversation not found or not accessible" });
+        }
+
+        // 2) Load the conversation, all users, and its messages
         const conversation = await Conversation.findOne({
+            where: { id: convoId, teamId },
             include: [
                 {
                     model: User,
-                    attributes: ['id', 'firstName', 'lastName', 'email'],
+                    as: "Users",
+                    attributes: ["id", "firstName", "lastName", "email"],
                     through: { attributes: [] }
                 },
                 {
                     model: Message,
+                    as: "Messages",
                     include: [
-                        { model: User, as: 'sender', attributes: ['id', 'firstName', 'lastName'] }
+                        {
+                            model: User,
+                            as: "sender",
+                            attributes: ["id", "firstName", "lastName"]
+                        }
                     ],
-                    order: [['createdAt', 'ASC']]
+                    order: [["createdAt", "ASC"]]
                 }
-            ],
-            where: {
-                id,
-                teamId,
-                '$Users.id$': userId // Ensure the requesting user is a participant
-            }
+            ]
         });
 
+        // should never happen, but just in case
         if (!conversation) {
-            return res.status(404).json({ message: "Conversation not found or not accessible" });
+            return res
+                .status(404)
+                .json({ message: "Conversation not found or not accessible" });
         }
 
-        // Update the last read timestamp for this user
+        // 3) Mark as read
         await ConversationParticipant.update(
             { lastRead: new Date() },
-            { where: { conversationId: id, userId } }
+            { where: { conversationId: convoId, userId } }
         );
 
+        // 4) Respond
         res.json({ conversation });
     } catch (error) {
         console.error("Error fetching conversation:", error);
@@ -203,59 +195,36 @@ const getConversationWithMessages = async (req, res) => {
 // Send a message
 const sendMessage = async (req, res) => {
     try {
-        const { conversationId, content, type = 'text', fileUrl = null } = req.body;
+        const { conversationId, content, type = "text", fileUrl = null } = req.body;
         const senderId = req.user.id;
         const teamId = req.user.teamId;
 
-        // Verify the conversation exists and user is a participant
-        const conversation = await Conversation.findOne({
-            include: [
-                {
-                    model: User,
-                    where: { id: senderId }
-                }
-            ],
-            where: {
-                id: conversationId,
-                teamId
-            }
+        // verify access
+        const convo = await Conversation.findOne({
+            where: { id: conversationId, teamId },
+            include: [{ model: User, as: "Users", where: { id: senderId } }]
         });
-
-        if (!conversation) {
+        if (!convo) {
             return res.status(404).json({ message: "Conversation not found or not accessible" });
         }
 
-        // Create the message
-        const message = await Message.create({
-            conversationId,
-            senderId,
-            content,
-            type,
-            fileUrl
-        });
-
-        // Get sender details to include in response
+        // create + emit
+        const message = await Message.create({ conversationId, senderId, content, type, fileUrl });
         const sender = await User.findByPk(senderId, {
-            attributes: ['id', 'firstName', 'lastName']
+            attributes: ["id", "firstName", "lastName"]
         });
+        const payload = { ...message.toJSON(), sender };
 
-        const messageWithSender = {
-            ...message.toJSON(),
-            sender
-        };
-
-        // Emit to all participants via socket.io
         const participants = await ConversationParticipant.findAll({
             where: { conversationId }
         });
-
-        participants.forEach(participant => {
-            if (participant.userId !== senderId) { // Don't send to the sender
-                req.io.to(`user-${participant.userId}`).emit('newMessage', messageWithSender);
+        participants.forEach(p => {
+            if (p.userId !== senderId) {
+                req.io.to(`user-${p.userId}`).emit("newMessage", payload);
             }
         });
 
-        res.status(201).json({ message: "Message sent successfully", sentMessage: messageWithSender });
+        res.status(201).json({ message: "Message sent successfully", sentMessage: payload });
     } catch (error) {
         console.error("Error sending message:", error);
         res.status(500).json({ message: "Server error" });

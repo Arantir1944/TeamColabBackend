@@ -1,72 +1,54 @@
 // controllers/callController.js
-const { Call, CallParticipant, Conversation, User } = require("../models");
+const {
+    Call,
+    CallParticipant,
+    Conversation,
+    ConversationParticipant,
+    User
+} = require("../models");
 
-// Initialize a new call
+// 1. Initiate a call
 const initiateCall = async (req, res) => {
     try {
         const { conversationId, type = 'video' } = req.body;
         const initiatorId = req.user.id;
         const teamId = req.user.teamId;
 
-        // Verify the conversation exists and user is a participant
-        const conversation = await Conversation.findOne({
-            include: [
-                {
-                    model: User,
-                    where: { id: initiatorId }
-                }
-            ],
-            where: {
-                id: conversationId,
-                teamId
-            }
+        // Verify conversation and membership
+        const convo = await Conversation.findByPk(conversationId, {
+            include: [{ model: User, as: 'Users', where: { id: initiatorId } }]
         });
-
-        if (!conversation) {
+        if (!convo) {
             return res.status(404).json({ message: "Conversation not found or not accessible" });
         }
 
-        // Check if there's already an active call in this conversation
-        const activeCall = await Call.findOne({
-            where: {
-                conversationId,
-                status: 'active'
-            }
+        // Prevent duplicate active call
+        const existing = await Call.findOne({
+            where: { conversationId, status: 'active' }
         });
-
-        if (activeCall) {
+        if (existing) {
             return res.status(400).json({
                 message: "An active call already exists in this conversation",
-                callId: activeCall.id
+                callId: existing.id
             });
         }
 
-        // Create the call
+        // Create call
         const call = await Call.create({
-            conversationId,
-            initiatorId,
-            type,
-            status: 'active',
-            startTime: new Date()
+            conversationId, initiatorId, type, status: 'active', startTime: new Date()
         });
-
-        // Add initiator as first participant
         await CallParticipant.create({
-            callId: call.id,
-            userId: initiatorId,
-            joinTime: new Date()
+            callId: call.id, userId: initiatorId, joinTime: new Date()
         });
 
-        // Get all conversation participants to notify them
+        // Notify others
         const participants = await ConversationParticipant.findAll({
             where: { conversationId },
             include: [{ model: User }]
         });
-
-        // Notify all participants except the initiator
-        participants.forEach(participant => {
-            if (participant.userId !== initiatorId) {
-                req.io.to(`user-${participant.userId}`).emit('incomingCall', {
+        participants.forEach(p => {
+            if (p.userId !== initiatorId) {
+                req.io.to(`user-${p.userId}`).emit('incomingCall', {
                     callId: call.id,
                     conversationId,
                     initiatorId,
@@ -76,234 +58,189 @@ const initiateCall = async (req, res) => {
             }
         });
 
-        res.status(201).json({
+        return res.status(201).json({
             message: "Call initiated successfully",
             call,
-            roomId: `call-${call.id}`  // Room ID for signaling
+            roomId: `call-${call.id}`
         });
-    } catch (error) {
-        console.error("Error initiating call:", error);
-        res.status(500).json({ message: "Server error" });
+    } catch (err) {
+        console.error("Error initiating call:", err);
+        return res.status(500).json({ message: "Server error" });
     }
 };
 
-// Join an existing call
+// 2. Join a call
 const joinCall = async (req, res) => {
     try {
-        const { callId } = req.params;
+        const callId = parseInt(req.params.callId, 10);
         const userId = req.user.id;
-        const teamId = req.user.teamId;
 
-        // Verify the call exists and is active
-        const call = await Call.findOne({
-            include: [
-                {
-                    model: Conversation,
-                    where: { teamId },
-                    include: [
-                        {
-                            model: User,
-                            where: { id: userId } // Ensure user is a participant in the conversation
-                        }
-                    ]
-                }
-            ],
-            where: {
-                id: callId,
-                status: 'active'
-            }
-        });
-
+        // 2.1 Does the call exist?
+        const call = await Call.findByPk(callId);
         if (!call) {
-            return res.status(404).json({ message: "Call not found, ended, or not accessible" });
+            return res.status(404).json({ message: "Call not found" });
         }
 
-        // Check if user is already in the call
-        const existingParticipant = await CallParticipant.findOne({
-            where: {
-                callId,
-                userId,
-                leaveTime: null // Only consider active participations
-            }
-        });
-
-        if (existingParticipant) {
-            return res.status(400).json({ message: "You are already in this call" });
+        // 2.2 Is it still active?
+        if (call.status !== 'active') {
+            return res.status(400).json({ message: "Call has already ended" });
         }
 
-        // Add user as participant
-        const participant = await CallParticipant.create({
-            callId,
-            userId,
-            joinTime: new Date()
+        // 2.3 Is user part of that conversation?
+        const inConvo = await ConversationParticipant.findOne({
+            where: { conversationId: call.conversationId, userId }
         });
+        if (!inConvo) {
+            return res.status(403).json({ message: "You are not a participant in this conversation" });
+        }
 
-        // Notify other participants that a new user joined
+        // 2.4 Have they already joined?
+        const already = await CallParticipant.findOne({
+            where: { callId, userId, leaveTime: null }
+        });
+        if (already) {
+            return res.status(400).json({ message: "You have already joined this call" });
+        }
+
+        // 2.5 Ok, join
+        await CallParticipant.create({ callId, userId, joinTime: new Date() });
         req.io.to(`call-${callId}`).emit('userJoinedCall', {
             callId,
             userId,
             userName: `${req.user.firstName} ${req.user.lastName}`
         });
-
-        res.json({
-            message: "Joined call successfully",
-            callId,
-            roomId: `call-${callId}`
-        });
-    } catch (error) {
-        console.error("Error joining call:", error);
-        res.status(500).json({ message: "Server error" });
+        return res.json({ message: "Joined call successfully", callId, roomId: `call-${callId}` });
+    } catch (err) {
+        console.error("Error joining call:", err);
+        return res.status(500).json({ message: "Server error" });
     }
 };
 
-// Leave a call
+// 3. Leave a call
 const leaveCall = async (req, res) => {
     try {
-        const { callId } = req.params;
+        const callId = parseInt(req.params.callId, 10);
         const userId = req.user.id;
 
-        // Update the participant record to set leaveTime
-        const participant = await CallParticipant.findOne({
-            where: {
-                callId,
-                userId,
-                leaveTime: null // Only consider active participations
-            }
-        });
-
-        if (!participant) {
-            return res.status(404).json({ message: "You are not in this call" });
+        // 3.1 Does the call exist and is active?
+        const call = await Call.findByPk(callId);
+        if (!call) {
+            return res.status(404).json({ message: "Call not found" });
+        }
+        if (call.status !== 'active') {
+            return res.status(400).json({ message: "Call has already ended" });
         }
 
-        participant.leaveTime = new Date();
-        await participant.save();
+        // 3.2 Is user currently in it?
+        const part = await CallParticipant.findOne({
+            where: { callId, userId, leaveTime: null }
+        });
+        if (!part) {
+            return res.status(400).json({ message: "You are not currently in this call" });
+        }
 
-        // Notify other participants that a user left
+        // 3.3 Mark leave
+        part.leaveTime = new Date();
+        await part.save();
         req.io.to(`call-${callId}`).emit('userLeftCall', {
             callId,
             userId,
             userName: `${req.user.firstName} ${req.user.lastName}`
         });
 
-        // Check if there are any participants left
-        const remainingParticipants = await CallParticipant.findAll({
-            where: {
-                callId,
-                leaveTime: null
-            }
+        // 3.4 If none remain, end automatically
+        const remaining = await CallParticipant.count({
+            where: { callId, leaveTime: null }
         });
-
-        // If no participants left, end the call
-        if (remainingParticipants.length === 0) {
-            const call = await Call.findByPk(callId);
+        if (remaining === 0) {
             call.status = 'ended';
             call.endTime = new Date();
             await call.save();
+            req.io.to(`call-${callId}`).emit('callEnded', {
+                callId,
+                endedBy: userId,
+                endedByName: `${req.user.firstName} ${req.user.lastName}`
+            });
         }
 
-        res.json({ message: "Left call successfully" });
-    } catch (error) {
-        console.error("Error leaving call:", error);
-        res.status(500).json({ message: "Server error" });
+        return res.json({ message: "Left call successfully" });
+    } catch (err) {
+        console.error("Error leaving call:", err);
+        return res.status(500).json({ message: "Server error" });
     }
 };
 
-// End a call (only for initiator)
+// 4. End a call (initiator only)
 const endCall = async (req, res) => {
     try {
-        const { callId } = req.params;
+        const callId = parseInt(req.params.callId, 10);
         const userId = req.user.id;
 
-        // Verify the call exists and user is the initiator
-        const call = await Call.findOne({
-            where: {
-                id: callId,
-                initiatorId: userId,
-                status: 'active'
-            }
-        });
-
+        // 4.1 Lookup
+        const call = await Call.findByPk(callId);
         if (!call) {
-            return res.status(404).json({ message: "Call not found or you are not the initiator" });
+            return res.status(404).json({ message: "Call not found" });
+        }
+        // 4.2 Only initiator
+        if (call.initiatorId !== userId) {
+            return res.status(403).json({ message: "Only the call initiator can end this call" });
+        }
+        // 4.3 Still active?
+        if (call.status !== 'active') {
+            return res.status(400).json({ message: "Call has already been ended" });
         }
 
-        // Update call status
+        // 4.4 End it
         call.status = 'ended';
         call.endTime = new Date();
         await call.save();
-
-        // Update all participants to have left
         await CallParticipant.update(
             { leaveTime: new Date() },
-            {
-                where: {
-                    callId,
-                    leaveTime: null
-                }
-            }
+            { where: { callId, leaveTime: null } }
         );
-
-        // Notify all participants that the call has ended
         req.io.to(`call-${callId}`).emit('callEnded', {
             callId,
             endedBy: userId,
             endedByName: `${req.user.firstName} ${req.user.lastName}`
         });
 
-        res.json({ message: "Call ended successfully" });
-    } catch (error) {
-        console.error("Error ending call:", error);
-        res.status(500).json({ message: "Server error" });
+        return res.json({ message: "Call ended successfully" });
+    } catch (err) {
+        console.error("Error ending call:", err);
+        return res.status(500).json({ message: "Server error" });
     }
 };
 
-// Get current call participants
+// 5. List participants
 const getCallParticipants = async (req, res) => {
     try {
-        const { callId } = req.params;
+        const callId = parseInt(req.params.callId, 10);
         const userId = req.user.id;
-        const teamId = req.user.teamId;
 
-        // Verify the call exists and user is a participant
-        const call = await Call.findOne({
-            include: [
-                {
-                    model: Conversation,
-                    where: { teamId },
-                    include: [
-                        {
-                            model: User,
-                            where: { id: userId } // Ensure user is a participant in the conversation
-                        }
-                    ]
-                }
-            ],
-            where: {
-                id: callId,
-                status: 'active'
-            }
-        });
-
+        // 5.1 Verify call
+        const call = await Call.findByPk(callId);
         if (!call) {
-            return res.status(404).json({ message: "Call not found, ended, or not accessible" });
+            return res.status(404).json({ message: "Call not found" });
+        }
+        if (call.status !== 'active') {
+            return res.status(400).json({ message: "Call has already ended" });
         }
 
-        // Get active participants
-        const participants = await CallParticipant.findAll({
-            include: [
-                {
-                    model: User,
-                    attributes: ['id', 'firstName', 'lastName', 'email']
-                }
-            ],
-            where: {
-                callId,
-                leaveTime: null // Only active participants
-            }
+        // 5.2 Verify access via the conversation
+        const inConvo = await ConversationParticipant.findOne({
+            where: { conversationId: call.conversationId, userId }
+        });
+        if (!inConvo) {
+            return res.status(403).json({ message: "You are not a participant in this conversation" });
+        }
+
+        // 5.3 Fetch active participants
+        const parts = await CallParticipant.findAll({
+            where: { callId, leaveTime: null },
+            include: [{ model: User, attributes: ['id', 'firstName', 'lastName', 'email'] }]
         });
 
-        // Transform to a more client-friendly format
-        const formattedParticipants = participants.map(p => ({
+        const participants = parts.map(p => ({
             id: p.User.id,
             firstName: p.User.firstName,
             lastName: p.User.lastName,
@@ -311,10 +248,10 @@ const getCallParticipants = async (req, res) => {
             joinTime: p.joinTime
         }));
 
-        res.json({ participants: formattedParticipants });
-    } catch (error) {
-        console.error("Error getting call participants:", error);
-        res.status(500).json({ message: "Server error" });
+        return res.json({ participants });
+    } catch (err) {
+        console.error("Error getting call participants:", err);
+        return res.status(500).json({ message: "Server error" });
     }
 };
 

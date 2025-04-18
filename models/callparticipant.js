@@ -1,16 +1,17 @@
+// models/callparticipant.js
 'use strict';
-const {
-  Model
-} = require('sequelize');
+const { Model } = require('sequelize');
 module.exports = (sequelize, DataTypes) => {
   class CallParticipant extends Model {
-    /**
-     * Helper method for defining associations.
-     * This method is not a part of Sequelize lifecycle.
-     * The `models/index` file will call this method automatically.
-     */
     static associate(models) {
-      // define association here
+      // Link each participant back to the User who joined
+      CallParticipant.belongsTo(models.User, {
+        foreignKey: 'userId'
+      });
+      // And to the Call they joined
+      CallParticipant.belongsTo(models.Call, {
+        foreignKey: 'callId'
+      });
     }
   }
   CallParticipant.init({

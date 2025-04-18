@@ -1,3 +1,4 @@
+// models/user.js
 module.exports = (sequelize, DataTypes) => {
   const User = sequelize.define("User", {
     firstName: DataTypes.STRING,
@@ -11,7 +12,18 @@ module.exports = (sequelize, DataTypes) => {
   });
 
   User.associate = (models) => {
+    // existing:
     User.belongsTo(models.Team, { foreignKey: "teamId", onDelete: "CASCADE" });
+
+    // **new**: conversations
+    User.belongsToMany(models.Conversation, {
+      through: models.ConversationParticipant,
+      foreignKey: 'userId',
+      as: 'Conversations'
+    });
+
+    // optional: messages
+    User.hasMany(models.Message, { foreignKey: 'senderId', as: 'SentMessages' });
   };
 
   return User;

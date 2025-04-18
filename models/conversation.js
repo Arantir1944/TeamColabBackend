@@ -1,16 +1,22 @@
+// models/conversation.js
 'use strict';
-const {
-  Model
-} = require('sequelize');
+const { Model } = require('sequelize');
 module.exports = (sequelize, DataTypes) => {
   class Conversation extends Model {
-    /**
-     * Helper method for defining associations.
-     * This method is not a part of Sequelize lifecycle.
-     * The `models/index` file will call this method automatically.
-     */
     static associate(models) {
-      // define association here
+      // a conversation belongs to a team
+      Conversation.belongsTo(models.Team, { foreignKey: 'teamId' });
+
+      // link users via the join table
+      Conversation.belongsToMany(models.User, {
+        through: models.ConversationParticipant,
+        foreignKey: 'conversationId',
+        as: 'Users'
+      });
+
+      // if you want, also:
+      Conversation.hasMany(models.Message, { foreignKey: 'conversationId' });
+      Conversation.hasMany(models.ConversationParticipant, { foreignKey: 'conversationId' });
     }
   }
   Conversation.init({
