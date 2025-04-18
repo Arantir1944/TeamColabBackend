@@ -1,84 +1,84 @@
+// index.js
 require("dotenv").config();
 const express = require("express");
-const http = require("http"); // Required for WebSockets
+const http = require("http");           // Required for Socket.io
 const cors = require("cors");
 const { Server } = require("socket.io");
 
 const app = express();
-const server = http.createServer(app); // Create an HTTP server
+const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "*", // Change this to your frontend URL in production
-        methods: ["GET", "POST"],
-    },
+        origin: "*",     // TODO: restrict to your frontend URL in production
+        methods: ["GET", "POST"]
+    }
 });
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-// Attach `io` to requests using middleware
+// Attach `io` to request handlers
 const socketMiddleware = require("./middleware/socketMiddleware");
 app.use(socketMiddleware(io));
 
-// WebSocket handling
+// Standard middleware
+app.use(cors());
+app.use(express.json());
+
+// WebSocket (Socket.io) handling
 io.on("connection", socket => {
-    // identify the user’s socket-room
+    console.log(`Socket connected: ${socket.id}`);
+
+    // Associate this socket with a user room
     socket.on("register", ({ userId }) => {
         socket.join(`user-${userId}`);
+        console.log(`→ socket ${socket.id} joined user-${userId}`);
     });
 
-    // chat rooms
+    // Chat room join/leave
     socket.on("joinConversation", conversationId => {
         socket.join(`conversation-${conversationId}`);
+        console.log(`→ socket ${socket.id} joined conversation-${conversationId}`);
     });
     socket.on("leaveConversation", conversationId => {
         socket.leave(`conversation-${conversationId}`);
+        console.log(`→ socket ${socket.id} left conversation-${conversationId}`);
+    });
+
+    // (Optional) team rooms for other real‑time features
+    socket.on("joinTeam", teamId => {
+        socket.join(`team-${teamId}`);
+        console.log(`→ socket ${socket.id} joined team-${teamId}`);
     });
 
     // WebRTC signaling for calls
-    socket.on("offer", payload => io.to(`call-${payload.callId}`).emit("offer", payload));
-    socket.on("answer", payload => io.to(`call-${payload.callId}`).emit("answer", payload));
-    socket.on("ice-candidate", payload => io.to(`call-${payload.callId}`).emit("ice-candidate", payload));
+    socket.on("offer", payload => {
+        io.to(`call-${payload.callId}`).emit("offer", payload);
+    });
+    socket.on("answer", payload => {
+        io.to(`call-${payload.callId}`).emit("answer", payload);
+    });
+    socket.on("ice-candidate", payload => {
+        io.to(`call-${payload.callId}`).emit("ice-candidate", payload);
+    });
 
     socket.on("disconnect", () => {
-        console.log(`User disconnected: ${socket.id}`);
+        console.log(`Socket disconnected: ${socket.id}`);
     });
 });
 
-
-// Routes
+// Health‑check endpoint
 app.get("/", (req, res) => {
     res.send("Team Hub Backend is Running!");
 });
 
-const authRoutes = require("./routes/authRoutes");
-app.use("/api/auth", authRoutes);
-
-const protectedRoutes = require("./routes/protectedRoutes");
-app.use("/api/protected", protectedRoutes);
-
-const teamRoutes = require("./routes/teamRoutes");
-app.use("/api/teams", teamRoutes);
-
-const roleRoutes = require("./routes/roleRoutes");
-app.use("/api/roles", roleRoutes);
-
-const boardRoutes = require("./routes/boardRoutes");
-app.use("/api/boards", boardRoutes);
-
-const taskRoutes = require("./routes/taskRoutes");
-app.use("/api/tasks", taskRoutes);
-
-const wikiRoutes = require("./routes/wikiRoutes");
-app.use("/api/wiki", wikiRoutes);
-
-const chatRoutes = require("./routes/chatRoutes");
-app.use("/api/chat", chatRoutes);
-
-const callRoutes = require("./routes/callRoutes");
-app.use("/api/calls", callRoutes);
-
+// API routes
+app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/protected", require("./routes/protectedRoutes"));
+app.use("/api/teams", require("./routes/teamRoutes"));
+app.use("/api/roles", require("./routes/roleRoutes"));
+app.use("/api/boards", require("./routes/boardRoutes"));
+app.use("/api/tasks", require("./routes/taskRoutes"));
+app.use("/api/wiki", require("./routes/wikiRoutes"));
+app.use("/api/chat", require("./routes/chatRoutes"));
+app.use("/api/calls", require("./routes/callRoutes"));
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
