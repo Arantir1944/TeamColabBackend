@@ -14,9 +14,11 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "fs": "^0.0.1-security",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.1",
     "pg-hstore": "^2.3.4",
+    "pm2": "^6.0.6",
     "sequelize": "^6.37.5",
     "sequelize-cli": "^6.6.2",
     "socket.io": "^4.8.1"

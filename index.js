@@ -3,12 +3,17 @@ if (process.env.NODE_ENV !== "production") {
     require('dotenv').config();
 }
 const express = require("express");
-const http = require("http");           // Required for Socket.io
+const https = require("https");           // Required for Socket.io
+const fs = require("fs");
+const sslOptions = {
+    key: fs.readFileSync("../ssl/server.key"),
+    cert: fs.readFileSync("../ssl/server.cert")
+};
 const cors = require("cors");
 const { Server } = require("socket.io");
 
 const app = express();
-const server = http.createServer(app);
+const server = https.createServer(sslOptions, app);
 const io = new Server(server, {
     cors: {
         origin: "*",     // TODO: restrict to your frontend URL in production
@@ -82,7 +87,7 @@ app.use("/api/wiki", require("./routes/wikiRoutes"));
 app.use("/api/chat", require("./routes/chatRoutes"));
 app.use("/api/calls", require("./routes/callRoutes"));
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
