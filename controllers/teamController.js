@@ -90,8 +90,16 @@ const joinTeam = async (req, res) => {
 // Get the team associated with the authenticated user
 const getUserTeam = async (req, res) => {
     try {
-        const user = await User.findByPk(req.user.id, { include: Team });
-        if (!user || !user.Team) return res.status(404).json({ message: "No team found" });
+        const user = await User.findByPk(req.user.id, {
+            include: {
+                model: Team,
+                include: [{ model: User, attributes: ["id", "firstName", "lastName", "email"] }]
+            }
+        });
+
+        if (!user || !user.Team) {
+            return res.status(404).json({ message: "No team found" });
+        }
 
         res.status(200).json({ team: user.Team });
     } catch (error) {

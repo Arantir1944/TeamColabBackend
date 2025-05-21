@@ -10,7 +10,7 @@ const router = express.Router();
 router.get("/", authenticateUser, getAllTeams);
 
 router.post("/create", authenticateUser, createTeam);  // Only Managers
-router.post("/join", authenticateUser, joinTeam);  // Any user can join
-router.get("/my-team", authenticateUser, getUserTeam);
+//router.post("/join", authenticateUser, joinTeam);  // Any user can join
+router.get("/user", authenticateUser, getUserTeam);
 
 module.exports = router;
