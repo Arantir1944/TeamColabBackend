@@ -1,5 +1,7 @@
 const bcrypt = require("bcrypt");
 const { User } = require("../models");
+const { Op } = require('sequelize');
+
 
 // Get a user by ID
 const getUser = async (req, res) => {
@@ -70,4 +72,28 @@ const deleteUser = async (req, res) => {
     }
 };
 
-module.exports = { getUser, updateUser, deleteUser };
+const searchUsers = async (req, res) => {
+    const search = req.query.search || '';
+    const currentUserId = req.user.id;
+
+    try {
+        const users = await User.findAll({
+            where: {
+                id: { [Op.ne]: currentUserId },
+                [Op.or]: [
+                    { firstName: { [Op.iLike]: `%${search}%` } },
+                    { lastName: { [Op.iLike]: `%${search}%` } },
+                    { email: { [Op.iLike]: `%${search}%` } }
+                ]
+            },
+            attributes: ['id', 'firstName', 'lastName', 'email']
+        });
+
+        res.json({ users });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to search users' });
+    }
+};
+
+module.exports = { getUser, updateUser, deleteUser, searchUsers };
