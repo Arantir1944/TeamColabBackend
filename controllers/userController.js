@@ -21,7 +21,7 @@ const getUser = async (req, res) => {
 const updateUser = async (req, res) => {
     try {
         const userId = req.params.id;
-        const { firstName, lastName, email, password, role } = req.body;
+        const { firstName, lastName, email, password, role, teamId } = req.body;
 
         const user = await User.findByPk(userId);
         if (!user) return res.status(404).json({ message: "User not found" });
@@ -36,7 +36,8 @@ const updateUser = async (req, res) => {
         user.firstName = firstName || user.firstName;
         user.lastName = lastName || user.lastName;
         user.email = email || user.email;
-
+        user.teamId = teamId || user.teamId;
+        user.role = role || user.role;
         if (password) {
             user.password = await bcrypt.hash(password, 10);
         }

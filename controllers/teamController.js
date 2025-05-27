@@ -93,7 +93,7 @@ const getUserTeam = async (req, res) => {
         const user = await User.findByPk(req.user.id, {
             include: {
                 model: Team,
-                include: [{ model: User, attributes: ["id", "firstName", "lastName", "email"] }]
+                include: [{ model: User, attributes: ["id", "firstName", "lastName", "email", "role", "teamId"] }]
             }
         });
 
